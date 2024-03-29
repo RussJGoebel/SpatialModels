@@ -1,0 +1,92 @@
+---
+title: "generating_spatial_data"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{generating_spatial_data}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(SpatialModels)
+library(usmap)
+library(ggplot2)
+library(mapdata)
+library(sf)
+```
+
+In this document, we explore methods of generating synthetic spatial data and custom gridlines for the purposes of testing models.
+
+We use the greater boston area as a basis for our analysis, defined as New England City and Town Area
+
+```{r}
+# FIPS codes start with 2 digits corresponding to the state and end with 3 digits corresponding to the county.
+
+# Boston Counties:
+# Essex: 25009
+# Middlesex: 25017
+# Norfolk:  25021
+# Plymoth:  25023
+# Suffolk:  25025
+# -------------
+# NH: 
+# Rockingham: 33015
+# Strafford: 	33017
+
+
+
+greater_boston_counties <- c(25009,25017,25021,25023,25025,33015,33017)
+
+```
+
+
+```{r}
+#boston_area <- c("essex","middlesex","norfolk","plymouth","suffolk")
+#MA <- map_data("county") %>% filter(region == "massachusetts", subregion %in% boston_area) 
+
+#ggplot(data = MA)+geom_polygon(aes(x = long, y = lat, group = group), fill = "white",color = "black")
+
+```
+
+```{r}
+boston_area <- c("essex","middlesex","norfolk","plymouth","suffolk")
+boston_area_map <- maps::map(database = "county",regions = paste("massachusetts",boston_area,sep = ","), fill = TRUE)
+boston_area_sf <- st_as_sf(boston_area_map)
+
+ggplot(boston_area_sf)+geom_sf()
+```
+
+
+```{r}
+theta <- -pi/4
+
+grid1 <- st_make_grid(boston_area_sf,cellsize = c(0.5,0.5)/25)
+grid2 <- st_make_grid(boston_area_sf,cellsize = c(4,7)/25)
+
+
+center <- st_centroid(st_union(grid2))
+m = matrix(c(cos(theta),sin(theta),-sin(theta),cos(theta)), 2)
+grid2 <- st_geometry(grid2-center)*m+center
+grid2 <- st_set_crs(grid2,st_crs(grid1))
+
+grid1 <- st_as_sf(grid1)
+grid2 <- st_as_sf(grid2)
+
+ggplot(boston_area_sf)+geom_sf()+geom_sf(data = grid1, alpha = 0)+geom_sf(data = grid2, alpha = 0)
+```
+The `sf` package makes it relatively easy to do what we want.
+
+```{r}
+value_grid2 <- cbind(value = rnorm(45),grid2)
+ggplot(boston_area_sf)+geom_sf()+geom_sf(data = grid1, alpha = 0)+geom_sf(data = value_grid2, aes(fill = value), alpha = 0.5)
+```
+
+
+

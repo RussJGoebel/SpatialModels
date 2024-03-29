@@ -1,0 +1,185 @@
+---
+title: "grid_exploration"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{grid_exploration}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(SpatialModels)
+library(ggplot2)
+library(sf)
+library(units)
+```
+
+# Boston Map and Grid Functions
+
+We can generate a map of boston as a base:
+
+```{r}
+boston_map <- generate_boston_map(plot = TRUE)
+```
+Then, we can generate grid layers:
+
+```{r}
+fine_grid <- generate_grid(boston_map,plot = TRUE,n = c(20,20))
+coarse_grid <- generate_grid(boston_map,plot = TRUE,n = c(10,10),theta = -pi/4)
+```
+
+We can plot them all together:
+
+```{r}
+ggplot()+
+  geom_sf(data = boston_map)+
+  geom_sf(data = fine_grid,alpha = 0)+
+  geom_sf(data = coarse_grid,alpha = 0)
+```
+# Generating random field
+
+Suppose our underyling grid should produce values correlated based on distance between centroids. We can simulate this as follows.
+```{r}
+
+gaussian_random_field <- generate_gaussian_random_field(boston_map,
+                                                        l = 1,
+                                                        n = c(30,30),
+                                                        plot = TRUE)
+
+
+```
+Suppose we want to compute the area of intersecting grid slices.
+
+```{r}
+boston_map <- generate_boston_map()
+fine_grid <- generate_gaussian_random_field(boston_map,
+                                                        l = 1,
+                                                        n = c(40,40),
+                                                        plot = TRUE)
+coarse_grid <- generate_grid(boston_map,n = c(10,10),theta = -pi/4)
+
+intersection <- st_intersection(coarse_grid,fine_grid)
+
+intersection_centroids <- sf::st_centroid(intersection)
+fine_grid_containment_matrix <- sf::st_contains(fine_grid,intersection_centroids,sparse = FALSE)
+coarse_grid_containment_matrix <- sf::st_contains(coarse_grid,intersection_centroids,sparse = FALSE)
+
+coarse_grid_areas <- as.vector(st_area(coarse_grid))
+
+intersection_areas <- compute_intersection_areas(fine_grid,coarse_grid,plot = FALSE)
+fine_area_mat <- apply(fine_grid_containment_matrix,1,function(x){intersection_areas$area*x})
+coarse_area_weight_mat <- apply(coarse_grid_containment_matrix,2,function(x) 1/coarse_grid_areas*x)
+
+A <- coarse_area_weight_mat %*% fine_area_mat
+
+coarse_grid_value <- A %*% fine_grid$value
+
+coarse_grid$value <- coarse_grid_value
+
+ggplot()+geom_sf(data = boston_map)+geom_sf(data = coarse_grid,aes(fill = value))
+
+```
+
+Experiment in recovering x:
+
+```{r}
+centroids <- st_centroid(fine_grid)
+distances <- sf::st_distance(centroids,centroids)
+standardized_distances <- distances/sd(distances)
+
+covariances <- exp(-matrix(standardized_distances,nrow = 40^2,ncol = 40^2)/1)
+
+lambda <- sqrt(0.1)
+
+estimated_fine_values <- solve(crossprod(A)+lambda^2*crossprod(solve(covariances)))%*%crossprod(A,coarse_grid$value)
+estimated_fine_values_simple <- solve(crossprod(A)+lambda^2*crossprod(diag(1600)))%*%crossprod(A,coarse_grid$value)
+
+fine_grid$estimated_value <- estimated_fine_values
+fine_grid$estimated_value_simple <- estimated_fine_values_simple
+
+color_limits <- c(min(fine_grid$value),max(fine_grid$value))
+
+ggplot()+geom_sf(data = boston_map)+geom_sf(data = fine_grid,aes(fill = value))+scale_fill_continuous(limits = color_limits)
+ggplot()+geom_sf(data = boston_map)+geom_sf(data = fine_grid,aes(fill = estimated_value))+scale_fill_continuous(limits = color_limits)
+ggplot()+geom_sf(data = boston_map)+geom_sf(data = fine_grid,aes(fill = estimated_value_simple))+scale_fill_continuous(limits = color_limits)
+```
+
+
+Testing coarse grid computation:
+
+```{r}
+fine_grid <- generate_gaussian_random_field(boston_map,
+                                                        l = 1,
+                                                        n = c(40,40),
+                                                        plot = TRUE)
+coarse_grid <- generate_grid(boston_map,n = c(10,10),theta = -pi/4)
+
+coarse_grid <- generate_coarse_grid_value(fine_grid,coarse_grid)
+
+
+covariance_matrix <- compute_distance_covariance_matrix(fine_grid,l=1)
+lambda = 0.5
+
+fine_grid_gaussian <- estimate_fine_grid(fine_grid,coarse_grid,covariance_matrix,lambda)
+
+lambda = 0.1
+diagonal_covariance <- diag(dim(fine_grid)[1])
+fine_grid_diagonal <- estimate_fine_grid(fine_grid,coarse_grid,diagonal_covariance,lambda)
+
+```
+
+```{r}
+
+color_limits <- c(min(fine_grid$value),max(fine_grid$value))
+
+
+ggplot()+
+  geom_sf(data = boston_map)
+
+ggplot()+
+  geom_sf(data = boston_map)+
+  geom_sf(data = coarse_grid,alpha = 0)
+
+ggplot()+
+  geom_sf(data = boston_map)+
+  geom_sf(data = fine_grid,alpha = 0)
+
+ggplot()+
+  geom_sf(data = boston_map)+
+  geom_sf(data = fine_grid,alpha = 0)+
+  geom_sf(data = coarse_grid,alpha = 0)
+
+
+ggplot()+
+  geom_sf(data = boston_map)+
+  geom_sf(data = fine_grid,aes(fill = value))+
+  scale_fill_continuous(limits = color_limits)
+
+ggplot()+
+  geom_sf(data = boston_map)+
+  geom_sf(data = coarse_grid,aes(fill = value))+
+  scale_fill_continuous(limits = color_limits)
+
+ggplot()+
+  geom_sf(data = boston_map)+
+  geom_sf(data = fine_grid_diagonal,aes(fill = estimated_value))+
+  scale_fill_continuous(limits = color_limits)
+
+ggplot()+
+  geom_sf(data = boston_map)+
+  geom_sf(data = fine_grid_gaussian,aes(fill = estimated_value))+
+  scale_fill_continuous(limits = color_limits)
+
+ggplot()+
+  geom_sf(data = boston_map)+
+  geom_sf(data = fine_grid,aes(fill = value))+
+  scale_fill_continuous(limits = color_limits)
+```
+

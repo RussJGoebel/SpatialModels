@@ -1,0 +1,158 @@
+---
+title: "Boston Simulation"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Boston Simulation}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 8,
+  fig.height = 6,
+  fig.align = "center"
+)
+```
+
+```{r setup}
+library(SpatialModels)
+library(SpatialModels)
+library(ggplot2)
+library(sf)
+library(ggpubr)
+```
+
+```{r}
+set.seed(2)
+n_fine <- 30
+n_coarse <- 10
+```
+
+
+# Boston Simulation
+
+In this document, we explore a simulation of pixel data gathered over the Boston area.
+
+A map of Boston is used as a reference underlying the pixels:
+
+```{r}
+boston_map <- generate_boston_map(plot = TRUE)
+```
+
+Over this map, we can create a grid of pixels representing those taken from a satellite.
+These can be taken at varying angles, so we tilt them 45 degrees.
+
+```{r}
+coarse_grid <- generate_grid(boston_map,plot = TRUE,n = c(n_coarse,n_coarse),theta = -pi/4)
+```
+
+Underneath this grid, we can create a fine grid representing the raster image of pixels
+which we would like to downcalse our satellite image to:
+
+```{r}
+fine_grid <- generate_grid(boston_map,plot = TRUE,n = c(n_fine,n_fine))
+
+ggplot()+
+  geom_sf(data = boston_map)+
+  geom_sf(data = fine_grid,alpha = 0)+
+  geom_sf(data = coarse_grid,alpha = 0)
+```
+
+In practice, there can be many satellite images over this fixed grid taken at a variety 
+of angles, but for this simulation, we use only one.
+
+Our objective is to use only the data from the **coarse** grid to reconstruct the data
+from the **fine** grid. 
+
+We expect the ground truth to have spatial correlation. Using an exponential covariance functiion $C(d) = e^{-(d/l)^2}$, we simulate a Gaussian random field on the fine grid.
+
+```{r}
+fine_grid <- generate_gaussian_random_field(boston_map,
+                                                        l = 1,
+                                                        n = c(n_fine,n_fine),
+                                                       plot = TRUE)
+
+color_limits <- c(-3.5,3.5) # used for plots
+```
+
+
+Then, using the areas of the intersections and the values, over the fine grid, we generate a coarse grid that we might expect out of a satellite image assuming no noise.
+
+
+```{r}
+coarse_grid <- generate_coarse_grid_value(fine_grid,coarse_grid)
+ggplot()+
+  geom_sf(data = boston_map)+
+  geom_sf(data = coarse_grid,aes(fill = value))+
+  scale_fill_continuous(limits = color_limits)+
+  ggtitle("Coarse Grid Measurements")
+```
+
+Finally, we use only the values from the coarse grid and knowledge of the pixel intersections
+and areas to recover the values on the fine grid.
+
+If our method assumes no spatial correlation, i.e, the regularization is diagonal,
+then we obtain
+
+```{r}
+lambda = 0.1
+diagonal_covariance <- diag(dim(fine_grid)[1])
+fine_grid_diagonal <- estimate_fine_grid(fine_grid,coarse_grid,diagonal_covariance,lambda)
+
+ggplot()+
+  geom_sf(data = boston_map)+
+  geom_sf(data = fine_grid_diagonal,aes(fill = estimated_value))+
+  scale_fill_continuous(limits = color_limits)+
+  ggtitle("Estimated Ground Truth using Diagonal Regularization")
+```
+
+However, if we assume some spatial correlation, i.e, the regularization is a scaling
+of the distance function used to generate the matrix, then we obtain
+
+```{r}
+covariance_matrix <- compute_distance_covariance_matrix(fine_grid,l=1)
+lambda = 0.5
+
+fine_grid_gaussian <- estimate_fine_grid(fine_grid,coarse_grid,covariance_matrix,lambda)
+
+ggplot()+
+  geom_sf(data = boston_map)+
+  geom_sf(data = fine_grid_gaussian,aes(fill = estimated_value))+
+  scale_fill_continuous(limits = color_limits)+
+  ggtitle("Estimated ground truth using Gaussian regularization")
+```
+
+
+
+
+
+```{r, eval = F}
+ground_truth <- ggplot()+
+  geom_sf(data = boston_map)+
+  geom_sf(data = fine_grid,aes(fill = value))+
+  scale_fill_continuous(limits = color_limits)+
+  ggtitle("Ground Truth")
+
+diagonal_reg <- ggplot()+
+  geom_sf(data = boston_map)+
+  geom_sf(data = fine_grid_diagonal,aes(fill = estimated_value))+
+  scale_fill_continuous(limits = color_limits)+
+  ggtitle("Estimated Ground Truth using Diagonal Regularization")
+
+gaussian_reg <- ggplot()+
+  geom_sf(data = boston_map)+
+  geom_sf(data = fine_grid_gaussian,aes(fill = estimated_value))+
+  scale_fill_continuous(limits = color_limits)+
+  ggtitle("Estimated Ground Truth using Gaussian Regularization")
+
+ggarrange(ground_truth, diagonal_reg)
+ggarrange(ground_truth, gaussian_reg)
+```
+
+
+
+
+
